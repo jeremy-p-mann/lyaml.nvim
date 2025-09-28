@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    name: Smoke test (${{ matrix.label }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Ubuntu 24.04
+            image: ubuntu:24.04
+            setup: |
+              apt-get update
+              DEBIAN_FRONTEND=noninteractive apt-get install -y \
+                build-essential \
+                ca-certificates \
+                git \
+                neovim \
+                pkg-config
+          - label: Arch Linux
+            image: archlinux:latest
+            setup: |
+              pacman -Sy --noconfirm archlinux-keyring
+              pacman -Syu --noconfirm
+              pacman -S --noconfirm --needed \
+                base-devel \
+                git \
+                neovim
+    container:
+      image: ${{ matrix.image }}
+      options: --env CI=1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ${{ matrix.setup }}
+
+      - name: Run Neovim smoke tests
+        shell: bash
+        env:
+          NVIM_APPNAME: ci-lyaml
+          LYAML_REPO: ${{ github.workspace }}
+          LYAML_REF: ${{ github.sha }}
+        run: |
+          set -euxo pipefail
+          config_dir="$HOME/.config/${NVIM_APPNAME}"
+          mkdir -p "$config_dir/lua/ci"
+          cp .github/ci/init.lua "$config_dir/init.lua"
+          cp .github/ci/lua/ci/smoke.lua "$config_dir/lua/ci/smoke.lua"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          nvim --version
+          nvim --headless '+lua require("ci.smoke").run()' +qa
